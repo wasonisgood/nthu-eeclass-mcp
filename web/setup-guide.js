@@ -1,174 +1,126 @@
 /**
- * NTHU eeclass Copilot - 安裝與首次設定互動精靈
+ * NTHU eeclass MCP - 擴充套件安裝與連線引導腳本
  */
 
 (function initSetupGuide() {
     "use strict";
 
     const BRIDGE_BASE_URL = "http://127.0.0.1:3001";
+    let isConnected = false;
+    let wizardOpened = false;
 
     const step1Card = document.getElementById("step-1-card");
     const step1Badge = document.getElementById("step-1-badge");
-    const extStatusMsg = document.getElementById("ext-status-msg");
-    const btnCheckExtension = document.getElementById("btn-check-extension");
-
     const step2Card = document.getElementById("step-2-card");
     const step2Badge = document.getElementById("step-2-badge");
-    const setupCredForm = document.getElementById("setup-cred-form");
-    const credIdInput = document.getElementById("cred-id");
-    const credPasswordInput = document.getElementById("cred-password");
-
     const step3Card = document.getElementById("step-3-card");
     const step3Badge = document.getElementById("step-3-badge");
-    const btnTriggerLogin = document.getElementById("btn-trigger-login");
-    const courseScanResults = document.getElementById("course-scan-results");
-    const scanTbody = document.getElementById("scan-tbody");
 
+    const extStatusDot = document.getElementById("ext-status-dot");
+    const extStatusTitle = document.getElementById("ext-status-title");
+    const extStatusDesc = document.getElementById("ext-status-desc");
     const setupStatusText = document.getElementById("setup-status-text");
 
-    let isExtDetected = false;
-    let isCredConfigured = false;
+    const btnOpenFolder = document.getElementById("btn-open-folder");
+    const btnVerifyAndLaunch = document.getElementById("btn-verify-and-launch");
+    const btnDirectWizard = document.getElementById("btn-direct-wizard");
 
-    async function checkExtensionStatus() {
-        extStatusMsg.textContent = "正在探測擴充功能...";
-        let detected = false;
-
-        // 1. 探測 chrome.runtime
-        if (typeof chrome !== "undefined" && chrome.runtime?.id) {
-            detected = true;
+    // 1. 開啟外掛本機目錄
+    btnOpenFolder?.addEventListener("click", async () => {
+        try {
+            await fetch(`${BRIDGE_BASE_URL}/extension/open-folder`, { method: "POST" });
+        } catch (e) {
+            alert("無法自動開啟目錄，請手動前往：C:\\Users\\user\\Downloads\\式\\nthu-eeclass-copilot");
         }
+    });
 
-        // 2. 探測 Bridge
+    // 2. 檢測擴充套件狀態
+    async function checkExtensionStatus(triggerWizard = false) {
         try {
             const res = await fetch(`${BRIDGE_BASE_URL}/extension/status`);
             if (res.ok) {
                 const data = await res.json();
-                if (data.lastReceivedEvent) detected = true;
-            }
-        } catch {}
-
-        isExtDetected = detected;
-        if (detected) {
-            step1Card.classList.remove("active");
-            step1Card.classList.add("completed");
-            step1Badge.textContent = "✓";
-            extStatusMsg.textContent = "✓ 已偵測到擴充功能正常運作中";
-            extStatusMsg.style.color = "#15803d";
-            step2Card.classList.add("active");
-            setupStatusText.textContent = "外掛就緒，請設定校務資訊密碼";
-        } else {
-            step1Card.classList.add("active");
-            extStatusMsg.textContent = "尚未偵測到外掛回應，請依上方說明在 Chrome 載入未打包項目";
-            extStatusMsg.style.color = "#b91c1c";
-            setupStatusText.textContent = "尚未安裝擴充功能";
-        }
-
-        await checkStoredCredentials();
-    }
-
-    async function checkStoredCredentials() {
-        if (typeof chrome !== "undefined" && chrome.storage?.local) {
-            chrome.storage.local.get(["eeclassAuthConfig"], (res) => {
-                const auth = res?.eeclassAuthConfig;
-                if (auth?.id && (auth?.password || auth?.cipherText)) {
-                    markStep2Complete(auth.id);
+                if (data.extensionConnected) {
+                    onExtensionConnected(data, triggerWizard);
+                    return true;
                 }
-            });
+            }
+        } catch (err) {}
+        return false;
+    }
+
+    // 3. 連線成功處理
+    async function onExtensionConnected(data, shouldOpenWizard = true) {
+        if (isConnected && wizardOpened) return;
+        isConnected = true;
+
+        // 更新 UI 狀態
+        step1Card?.classList.remove("active");
+        step1Card?.classList.add("completed");
+        if (step1Badge) step1Badge.textContent = "✓";
+
+        step2Card?.classList.remove("active");
+        step2Card?.classList.add("completed");
+        if (step2Badge) step2Badge.textContent = "✓";
+
+        step3Card?.classList.add("completed");
+        if (step3Badge) step3Badge.textContent = "✓";
+
+        if (extStatusDot) extStatusDot.className = "status-dot-pulse success";
+        if (extStatusTitle) extStatusTitle.textContent = "✓ 已成功偵測到 Chrome 擴充功能！";
+        if (extStatusDesc) extStatusDesc.textContent = "已為您在 Chrome 開啟擴充功能專屬的全螢幕設定精靈。請切換至該分頁完成學號密碼加密與課程身分劃分。";
+        if (setupStatusText) setupStatusText.textContent = "外掛已連線就緒";
+
+        const wizardUrl = data.wizardUrl || (data.extensionInfo?.wizardUrl);
+        if (wizardUrl && btnDirectWizard) {
+            btnDirectWizard.href = wizardUrl;
+            btnDirectWizard.style.display = "inline-flex";
         }
-    }
 
-    function markStep2Complete(userId) {
-        isCredConfigured = true;
-        step2Card.classList.remove("active");
-        step2Card.classList.add("completed");
-        step2Badge.textContent = "✓";
-        if (credIdInput) credIdInput.value = userId;
-        step3Card.classList.add("active");
-        setupStatusText.textContent = "憑證已設定，可進行登入與課程身份掃描";
-    }
+        if (btnVerifyAndLaunch) {
+            btnVerifyAndLaunch.textContent = "✓ 外掛已連線，設定精靈已啟動";
+            btnVerifyAndLaunch.disabled = true;
+        }
 
-    // 儲存密碼
-    setupCredForm?.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const id = credIdInput.value.trim();
-        const password = credPasswordInput.value;
-
-        if (typeof chrome !== "undefined" && chrome.storage?.local) {
-            await chrome.storage.local.set({
-                eeclassAuthConfig: { id, password, autoLogin: true }
-            });
-            markStep2Complete(id);
-            alert("已成功加密儲存帳號密碼！");
-        } else {
-            // 透過 Bridge 傳遞
+        // 觸發在 Chrome 開啟擴充功能全螢幕精靈
+        if (shouldOpenWizard && !wizardOpened) {
+            wizardOpened = true;
             try {
-                await fetch(`${BRIDGE_BASE_URL}/extension/auth/save`, {
+                await fetch(`${BRIDGE_BASE_URL}/extension/open-wizard`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ id, password })
+                    body: JSON.stringify({
+                        sessionId: "mcp_setup_" + Date.now(),
+                        caller: "Claude Desktop MCP"
+                    })
                 });
-                markStep2Complete(id);
-                alert("已成功透過橋接埠儲存密碼！");
-            } catch (err) {
-                alert(`儲存失敗：${err.message}`);
+            } catch (e) {}
+        }
+    }
+
+    // 4. 手動點擊「檢測連線並啟動設定精靈」
+    btnVerifyAndLaunch?.addEventListener("click", async () => {
+        btnVerifyAndLaunch.textContent = "正在檢測中...";
+        btnVerifyAndLaunch.disabled = true;
+
+        const ok = await checkExtensionStatus(true);
+        if (!ok) {
+            btnVerifyAndLaunch.textContent = "我已載入完成，檢測連線並啟動設定精靈";
+            btnVerifyAndLaunch.disabled = false;
+            if (extStatusDesc) {
+                extStatusDesc.textContent = "尚未偵測到外掛回應。請確認已在 Chrome「開發人員模式」下點選「載入未打包項目」，並確認外掛已啟用。";
+                extStatusDesc.style.color = "#b91c1c";
             }
         }
     });
 
-    // 觸發登入與身份掃描
-    btnTriggerLogin?.addEventListener("click", async () => {
-        btnTriggerLogin.disabled = true;
-        btnTriggerLogin.textContent = "正在登入並分析課程權限...";
-
-        try {
-            const res = await fetch(`${BRIDGE_BASE_URL}/extension/courses/roles`);
-            const data = await res.json();
-            renderCourseRoles(data);
-            step3Card.classList.remove("active");
-            step3Card.classList.add("completed");
-            step3Badge.textContent = "✓";
-            setupStatusText.textContent = "所有設定已完成！Claude Desktop 可正常使用";
-        } catch (e) {
-            // 模擬預設展示
-            renderCourseRoles({
-                teachingCourses: [
-                    { courseCode: "11310LAW100100", courseName: "行政法一", role: "assistant", identityLabel: "助教", permissions: "作業CRUD / 評分 / 試卷管理 / 公告發布" }
-                ],
-                studentCourses: [
-                    { courseCode: "11310CS300100", courseName: "演算法", role: "student", identityLabel: "學生", permissions: "瀏覽 / 講義下載 / 個人作業繳交" },
-                    { courseCode: "11310GE100200", courseName: "科技與社會", role: "student", identityLabel: "學生", permissions: "瀏覽 / 講義下載 / 個人作業繳交" }
-                ]
-            });
-            step3Card.classList.remove("active");
-            step3Card.classList.add("completed");
-            step3Badge.textContent = "✓";
-            setupStatusText.textContent = "課程權限已解析！";
+    // 5. 背景自動輪詢探測 (每 1.2 秒一次)
+    setInterval(() => {
+        if (!wizardOpened) {
+            checkExtensionStatus(true);
         }
-    });
+    }, 1200);
 
-    function renderCourseRoles(data) {
-        courseScanResults.hidden = false;
-        scanTbody.innerHTML = "";
-
-        const all = [
-            ...(data.teachingCourses || []).map(c => ({ ...c, isTeaching: true })),
-            ...(data.studentCourses || []).map(c => ({ ...c, isTeaching: false }))
-        ];
-
-        all.forEach(c => {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
-                <td><code>${c.courseCode}</code></td>
-                <td><strong>${c.courseName}</strong></td>
-                <td><span class="role-badge" style="background: ${c.isTeaching ? "#70146e" : "#0284c7"}">${c.identityLabel || (c.isTeaching ? "助教" : "學生")}</span></td>
-                <td style="font-size: 12px; color: #4b5563;">${c.permissions || (c.isTeaching ? "完整助教與教師管理" : "一般修課學生存取")}</td>
-            `;
-            scanTbody.appendChild(tr);
-        });
-    }
-
-    btnCheckExtension?.addEventListener("click", checkExtensionStatus);
-
-    // 初始化檢查
-    checkExtensionStatus();
+    // 初始檢測
+    checkExtensionStatus(false);
 })();

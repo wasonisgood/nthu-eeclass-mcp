@@ -16,6 +16,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
@@ -35,9 +36,11 @@ export class ExtensionBridge {
     this.decisionCallbacks = new Map(); // requestId -> { resolve, reject }
     this.extensionConnected = false;
     this.lastHeartbeat = 0;
+    this.extensionInfo = null; // { extensionId, version, wizardUrl, optionsUrl, hasCredentials }
     this.pendingCommands = [];
     this.waitingPollResponse = null;
     this.commandCallbacks = new Map(); // callId -> { resolve, timer }
+    this.setupCallbacks = new Map();   // sessionId -> { resolve, timer }
 
     // 預設已辨識之課程清單（包含行政法一 TA、演算法與通識修課學生）
     this.cachedCourseRoles = {
@@ -191,11 +194,18 @@ export class ExtensionBridge {
               const data = JSON.parse(body);
               this.extensionConnected = true;
               this.lastHeartbeat = Date.now();
+              this.extensionInfo = {
+                extensionId: data.extensionId || 'nthu-eeclass-copilot',
+                version: data.version || '1.4.0',
+                wizardUrl: data.wizardUrl || null,
+                optionsUrl: data.optionsUrl || null,
+                hasCredentials: Boolean(data.hasCredentials)
+              };
               this.lastReceivedEvent = {
                 timestamp: Date.now(),
                 source: 'CHROME_EXTENSION',
-                extensionId: data.extensionId || 'nthu-eeclass-copilot',
-                payload: data.payload,
+                extensionId: this.extensionInfo.extensionId,
+                payload: data.payload || data,
                 status: 'ACKNOWLEDGED'
               };
               res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -208,15 +218,116 @@ export class ExtensionBridge {
           return;
         }
 
-        // 3. 查詢外掛狀態
+        // 5. 查詢外掛狀態 (GET /extension/status)
         if (url.pathname === '/extension/status' && req.method === 'GET') {
+          const isHeartbeatFresh = (Date.now() - this.lastHeartbeat) < 60000;
+          const isConnected = this.extensionConnected && isHeartbeatFresh;
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({
             bridgeActive: true,
-            extensionConnected: this.extensionConnected,
+            extensionConnected: isConnected,
+            hasCredentials: Boolean(this.extensionInfo?.hasCredentials),
+            wizardUrl: this.extensionInfo?.wizardUrl || null,
+            optionsUrl: this.extensionInfo?.optionsUrl || null,
+            extensionInfo: this.extensionInfo,
             lastReceivedEvent: this.lastReceivedEvent,
             port: this.bridgePort
           }));
+        }
+
+        // 6. 觸發擴充功能全螢幕設定精靈 (POST /extension/open-wizard)
+        if (url.pathname === '/extension/open-wizard' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', async () => {
+            try {
+              const data = body ? JSON.parse(body) : {};
+              const sessionId = data.sessionId || 'session_' + Date.now();
+              const caller = data.caller || 'Claude Desktop MCP';
+              const result = await this.openExtensionWizard(sessionId, caller);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (e) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: e.message }));
+            }
+          });
+          return;
+        }
+
+        // 7. 接收設定精靈完成回報 (POST /extension/setup-complete)
+        if (url.pathname === '/extension/setup-complete' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', () => {
+            try {
+              const data = JSON.parse(body);
+              const { sessionId, caller, teachingCourses, studentCourses } = data;
+              if (Array.isArray(teachingCourses)) {
+                this.cachedCourseRoles.teachingCourses = teachingCourses;
+              }
+              if (Array.isArray(studentCourses)) {
+                this.cachedCourseRoles.studentCourses = studentCourses;
+              }
+              this.syncCourseRolesToConsentManager();
+
+              if (this.extensionInfo) {
+                this.extensionInfo.hasCredentials = true;
+              }
+
+              if (sessionId && this.setupCallbacks.has(sessionId)) {
+                const { resolve, timer } = this.setupCallbacks.get(sessionId);
+                clearTimeout(timer);
+                this.setupCallbacks.delete(sessionId);
+                resolve({
+                  success: true,
+                  teachingCourses: this.cachedCourseRoles.teachingCourses,
+                  studentCourses: this.cachedCourseRoles.studentCourses
+                });
+              }
+
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: true,
+                message: '身分劃分與憑證已成功同步至 MCP！'
+              }));
+            } catch (e) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: e.message }));
+            }
+          });
+          return;
+        }
+
+        // 8. 下載擴充套件原始碼 ZIP (GET /extension/download-zip)
+        if (url.pathname === '/extension/download-zip' && req.method === 'GET') {
+          const extFolder = 'C:\\Users\\user\\Downloads\\式\\nthu-eeclass-copilot';
+          const tempZip = path.join(os.tmpdir(), `nthu-eeclass-copilot-${Date.now()}.zip`);
+          const psCmd = `powershell -NoProfile -Command "Compress-Archive -Path '${extFolder}\\*' -DestinationPath '${tempZip}' -Force"`;
+          exec(psCmd, (err) => {
+            if (err || !fs.existsSync(tempZip)) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              return res.end(JSON.stringify({ error: '產生 ZIP 壓縮檔失敗: ' + (err?.message || '') }));
+            }
+            res.writeHead(200, {
+              'Content-Type': 'application/zip',
+              'Content-Disposition': 'attachment; filename="nthu-eeclass-copilot.zip"'
+            });
+            const stream = fs.createReadStream(tempZip);
+            stream.pipe(res);
+            stream.on('end', () => {
+              fs.unlink(tempZip, () => {});
+            });
+          });
+          return;
+        }
+
+        // 9. 在檔案總管開啟外掛目錄 (POST /extension/open-folder)
+        if (url.pathname === '/extension/open-folder' && req.method === 'POST') {
+          const extFolder = 'C:\\Users\\user\\Downloads\\式\\nthu-eeclass-copilot';
+          spawn('explorer.exe', [extFolder], { detached: true, stdio: 'ignore' });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ success: true, folder: extFolder }));
         }
 
         // 4. 查詢待處理的許可請求 (GET /extension/consent/pending?requestId=...)
@@ -356,6 +467,81 @@ export class ExtensionBridge {
       guideUrl: url,
       message: '已在 Chrome 瀏覽器中開啟「外掛安裝與首次使用設定精靈」。請依指示完成擴充套件載入與密碼設定。'
     };
+  }
+
+  /**
+   * 喚醒 Chrome 擴充功能內建的全螢幕設定精靈 (options.html?mode=full&wizard=1)
+   */
+  async openExtensionWizard(sessionId = 'mcp_' + Date.now(), caller = 'Claude Desktop MCP') {
+    await this.startBridgeServer();
+
+    const cmd = {
+      callId: 'wiz_' + Date.now(),
+      action: 'open_wizard',
+      params: { session: sessionId, caller }
+    };
+
+    if (this.waitingPollResponse) {
+      const res = this.waitingPollResponse;
+      this.waitingPollResponse = null;
+      try {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ hasCommand: true, command: cmd }));
+      } catch (e) {
+        this.pendingCommands.push(cmd);
+      }
+    } else {
+      this.pendingCommands.push(cmd);
+    }
+
+    let targetUrl = this.extensionInfo?.wizardUrl;
+    if (targetUrl) {
+      const glue = targetUrl.includes('?') ? '&' : '?';
+      targetUrl += `${glue}session=${encodeURIComponent(sessionId)}&caller=${encodeURIComponent(caller)}`;
+      spawn('cmd.exe', ['/c', 'start', 'chrome', targetUrl], { detached: true, stdio: 'ignore' });
+    }
+
+    return {
+      success: true,
+      sessionId,
+      wizardUrl: targetUrl,
+      message: '已向 Chrome 擴充套件發送全螢幕設定精靈啟動指令'
+    };
+  }
+
+  /**
+   * 取得擴充功能當前詳細連線與憑證設定狀態
+   */
+  async getExtensionStatus() {
+    const chromeRunning = await this.isChromeRunning();
+    const isHeartbeatFresh = (Date.now() - this.lastHeartbeat) < 60000;
+    const isConnected = this.extensionConnected && isHeartbeatFresh;
+    return {
+      chromeRunning,
+      extensionConnected: isConnected,
+      hasCredentials: Boolean(this.extensionInfo?.hasCredentials),
+      wizardUrl: this.extensionInfo?.wizardUrl || null,
+      optionsUrl: this.extensionInfo?.optionsUrl || null,
+      extensionInfo: this.extensionInfo
+    };
+  }
+
+  /**
+   * 等待設定精靈完成並回傳真實身分與課程
+   */
+  waitForSetupCompletion(sessionId, timeoutMs = 180000) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.setupCallbacks.delete(sessionId);
+        resolve({
+          success: false,
+          timeout: true,
+          message: '等待使用者在 Chrome 擴充功能設定精靈完成操作超時'
+        });
+      }, timeoutMs);
+
+      this.setupCallbacks.set(sessionId, { resolve, timer });
+    });
   }
 
   /**

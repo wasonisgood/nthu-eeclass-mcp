@@ -3,31 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>eeclass 全能助手 - 擴充套件安裝與首次設定引導</title>
+    <title>eeclass 全能助手 - 擴充功能安裝引導</title>
     <link rel="stylesheet" href="consent.css">
     <style>
         .step-card {
             border: 1px solid var(--border-color);
             border-radius: var(--radius-md);
             background: #ffffff;
-            padding: 16px 20px;
+            padding: 18px 20px;
             margin-bottom: 14px;
             display: flex;
             gap: 16px;
             align-items: flex-start;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            transition: all 0.2s ease;
         }
         .step-card.active {
             border-color: var(--primary-purple);
             box-shadow: 0 0 0 1px var(--primary-purple);
         }
         .step-card.completed {
-            border-color: var(--success-border);
-            background: #fbfdfb;
+            border-color: #86efac;
+            background: #f0fdf4;
         }
         .step-badge {
-            width: 28px;
-            height: 28px;
+            width: 30px;
+            height: 30px;
             border-radius: 50%;
             background: #e5e7eb;
             color: var(--text-secondary);
@@ -35,7 +35,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 13px;
+            font-size: 14px;
             flex-shrink: 0;
         }
         .step-card.active .step-badge {
@@ -43,7 +43,7 @@
             color: #ffffff;
         }
         .step-card.completed .step-badge {
-            background: var(--success-green);
+            background: #16a34a;
             color: #ffffff;
         }
         .step-content {
@@ -53,56 +53,80 @@
             font-size: 15px;
             font-weight: 600;
             color: var(--text-primary);
-            margin-bottom: 4px;
+            margin-bottom: 6px;
         }
         .step-desc {
             font-size: 13px;
             color: var(--text-secondary);
             line-height: 1.6;
+            margin-bottom: 8px;
         }
         .code-box {
             background: #f3f4f6;
             border: 1px solid #e5e7eb;
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 12px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12.5px;
             margin: 8px 0;
             user-select: all;
             word-break: break-all;
+            color: #1f2937;
         }
         .step-action-row {
-            margin-top: 10px;
+            margin-top: 12px;
             display: flex;
-            gap: 10px;
+            gap: 12px;
             align-items: center;
+            flex-wrap: wrap;
         }
-        .cred-form-mini {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin-top: 10px;
-            max-width: 360px;
-        }
-        .form-row {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .form-row label {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-secondary);
-        }
-        .form-input {
-            padding: 8px 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
+        .guide-steps-list {
+            margin-left: 20px;
             font-size: 13px;
+            color: #374151;
+            line-height: 1.7;
+            margin-top: 6px;
         }
-        .form-input:focus {
-            outline: none;
-            border-color: var(--primary-purple);
+        .status-box {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 12px 16px;
+            background: #fafafa;
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .status-dot-pulse {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #9ca3af;
+            flex-shrink: 0;
+        }
+        .status-dot-pulse.active {
+            background: #eab308;
+            box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.2);
+            animation: pulse-ring 1.6s infinite ease-out;
+        }
+        .status-dot-pulse.success {
+            background: #16a34a;
+            box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.2);
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .status-content-title {
+            font-size: 13.5px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .status-content-desc {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 2px;
         }
     </style>
 </head>
@@ -117,12 +141,12 @@
                 </svg>
                 <div class="header-titles">
                     <h1 class="header-title">eeclass 全能助手</h1>
-                    <span class="header-subtitle">環境檢測與首次使用設定精靈</span>
+                    <span class="header-subtitle">擴充功能安裝與連線引導</span>
                 </div>
             </div>
             <div class="header-security-badge" id="setup-status-badge">
                 <span class="status-dot"></span>
-                <span id="setup-status-text">正在檢測系統狀態...</span>
+                <span id="setup-status-text">探測擴充功能狀態中...</span>
             </div>
         </header>
 
@@ -131,87 +155,70 @@
         </div>
 
         <main class="consent-body">
-            <!-- 步驟 1：擴充套件安裝檢測 -->
-            <div class="step-card" id="step-1-card">
+            <!-- 步驟 1：取得擴充功能原始碼 -->
+            <div class="step-card active" id="step-1-card">
                 <div class="step-badge" id="step-1-badge">1</div>
                 <div class="step-content">
-                    <h2 class="step-title">步驟一：安裝並載入 Chrome 擴充功能</h2>
-                    <p class="step-desc">若您尚未將擴充套件載入 Chrome，請依照下列步驟載入未打包擴充功能：</p>
-                    <ol style="margin-left: 20px; font-size: 13px; color: #4b5563; margin-top: 4px; line-height: 1.6;">
-                        <li>開啟 Google Chrome，於網址列輸入 <span class="code-badge">chrome://extensions/</span> 並按下 Enter</li>
-                        <li>開啟右上角「<strong>開發人員模式</strong>」開關</li>
-                        <li>點擊左上方「<strong>載入未打包項目</strong>」，選擇專案目錄：</li>
-                    </ol>
+                    <h2 class="step-title">步驟一：取得擴充功能目錄</h2>
+                    <p class="step-desc">擴充套件已在您的本機電腦就緒。您可以直接在檔案總管開啟目錄，或下載 ZIP 壓縮檔：</p>
                     <div class="code-box" id="project-path-box">C:\Users\user\Downloads\式\nthu-eeclass-copilot</div>
                     <div class="step-action-row">
-                        <button type="button" class="btn btn-primary" id="btn-check-extension">
+                        <button type="button" class="btn btn-secondary" id="btn-open-folder">
                             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M1 4v6h6M15 12V6H9"></path>
-                                <path d="M14.5 9A6.5 6.5 0 0 1 3 11.5L1 10m1.5-5A6.5 6.5 0 0 1 13 4.5L15 6"></path>
+                                <path d="M1.5 3.5h4l1.5 2h7.5v7h-13z"></path>
                             </svg>
-                            重新檢測外掛載入狀態
+                            在檔案總管開啟外掛目錄
                         </button>
-                        <span id="ext-status-msg" style="font-size: 12px; color: #6b7280;">未偵測到回應</span>
+                        <a href="/extension/download-zip" class="btn btn-secondary" id="btn-download-zip" download="nthu-eeclass-copilot.zip">
+                            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M8 2v8m-3.5-3.5L8 10l3.5-3.5M2 13.5h12"></path>
+                            </svg>
+                            下載擴充套件 (ZIP)
+                        </a>
                     </div>
                 </div>
             </div>
 
-            <!-- 步驟 2：帳號密碼設定 -->
+            <!-- 步驟 2：載入擴充套件至 Chrome -->
             <div class="step-card" id="step-2-card">
                 <div class="step-badge" id="step-2-badge">2</div>
                 <div class="step-content">
-                    <h2 class="step-title">步驟二：設定校務資訊系統帳號密碼</h2>
-                    <p class="step-desc">擴充功能使用本機 AES-GCM 憑證保險箱安全加密儲存。設定後進入 eeclass 時將自動透過 CNN 模型辨識驗證碼完成登入。</p>
-                    
-                    <form id="setup-cred-form" class="cred-form-mini">
-                        <div class="form-row">
-                            <label for="cred-id">學號 / 教職員代號</label>
-                            <input type="text" id="cred-id" class="form-input" placeholder="例如：111062501" required>
-                        </div>
-                        <div class="form-row">
-                            <label for="cred-password">校務資訊系統密碼</label>
-                            <input type="password" id="cred-password" class="form-input" placeholder="請輸入密碼" required>
-                        </div>
-                        <div class="step-action-row">
-                            <button type="submit" class="btn btn-accent" id="btn-save-cred">加密儲存憑證</button>
-                            <a href="options.html?mode=full" class="btn btn-secondary" target="_blank" style="text-decoration: none;">開啟完整設定頁</a>
-                        </div>
-                    </form>
+                    <h2 class="step-title">步驟二：載入未打包擴充功能至 Google Chrome</h2>
+                    <p class="step-desc">請依照下列說明將外掛載入至 Chrome：</p>
+                    <ol class="guide-steps-list">
+                        <li>開啟 Google Chrome，於網址列輸入 <span class="code-badge">chrome://extensions/</span> 並按下 Enter</li>
+                        <li>開啟右上角「<strong>開發人員模式</strong>」開關</li>
+                        <li>點擊左上角「<strong>載入未打包項目</strong>」，選擇上述專案目錄完成載入</li>
+                    </ol>
                 </div>
             </div>
 
-            <!-- 步驟 3：首次登入與課程身份掃描 -->
+            <!-- 步驟 3：連線檢測與啟動設定精靈 -->
             <div class="step-card" id="step-3-card">
                 <div class="step-badge" id="step-3-badge">3</div>
                 <div class="step-content">
-                    <h2 class="step-title">步驟三：完成第一次登入與課程權限區分</h2>
-                    <p class="step-desc">登入成功後，系統將自動解析使用者所有修課與授課清單，精確區分「助教／授課教師」與「一般學生」身分，確保後續操作安全。</p>
+                    <h2 class="step-title">步驟三：外掛連線檢測與啟動全螢幕設定精靈</h2>
+                    <p class="step-desc">載入完成後，外掛背景服務將自動與本機 MCP 橋接器建立即時連線。系統將自動啟動擴充功能內建的全螢幕設定精靈。</p>
                     
-                    <div class="step-action-row">
-                        <button type="button" class="btn btn-accent" id="btn-trigger-login">
+                    <div class="status-box" id="ext-status-box">
+                        <span class="status-dot-pulse active" id="ext-status-dot"></span>
+                        <div style="flex: 1;">
+                            <div class="status-content-title" id="ext-status-title">正在探測擴充套件連線狀態...</div>
+                            <div class="status-content-desc" id="ext-status-desc">請完成上方載入未打包項目步驟。載入後此處將自動更新。</div>
+                        </div>
+                    </div>
+
+                    <div class="step-action-row" style="margin-top: 14px;">
+                        <button type="button" class="btn btn-primary" id="btn-verify-and-launch">
                             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="8" cy="8" r="7"></circle>
                                 <polyline points="6 8 8 10 11 6"></polyline>
                             </svg>
-                            執行登入並掃描課程身分
+                            我已載入完成，檢測連線並啟動設定精靈
                         </button>
-                    </div>
-
-                    <!-- 掃描結果表格 -->
-                    <div id="course-scan-results" style="margin-top: 14px;" hidden>
-                        <table class="payload-table">
-                            <thead>
-                                <tr>
-                                    <th>課程代碼</th>
-                                    <th>課程名稱</th>
-                                    <th>判定身分</th>
-                                    <th>可用權限</th>
-                                </tr>
-                            </thead>
-                            <tbody id="scan-tbody">
-                                <!-- 動態填入 -->
-                            </tbody>
-                        </table>
+                        <a id="btn-direct-wizard" class="btn btn-accent" target="_blank" style="display: none; text-decoration: none;">
+                            開啟全螢幕設定精靈 &rarr;
+                        </a>
                     </div>
                 </div>
             </div>

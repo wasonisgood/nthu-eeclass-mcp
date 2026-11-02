@@ -237,18 +237,27 @@ const store = {
 
 server.tool(
   "check_extension_and_setup_status",
-  "【環境與設定檢測】檢查 Google Chrome 瀏覽器是否開啟、擴充功能是否安裝並就緒、校務資訊系統密碼是否已完成加密設定，以及目前課程身份辨識狀態。若偵測到未安裝外掛或未設定密碼，將自動在 Chrome 開啟設定引導精靈。",
+  "【環境與設定檢測】檢查 Google Chrome 瀏覽器是否開啟、擴充功能是否安裝並就緒、校務資訊系統密碼是否已完成加密設定，以及目前課程身份辨識狀態。若尚未載入擴充套件將引導安裝；若已安裝但未設定將自動喚醒擴充功能內建全螢幕設定精靈。",
   {},
   async () => {
     const isChromeActive = await extensionBridge.isChromeRunning();
-    const isExtReady = extensionBridge.extensionConnected || Boolean(extensionBridge.lastReceivedEvent);
+    const status = await extensionBridge.getExtensionStatus();
     const guideUrl = `http://127.0.0.1:${extensionBridge.bridgePort}/setup-guide.html`;
 
-    // 若未開啟 Chrome 或外掛未就緒，自動喚醒引導精靈
     let actionTaken = "NONE";
-    if (!isChromeActive || !isExtReady) {
+    let statusText = "READY";
+    let advice = "Chrome 擴充功能處於就緒狀態，已具備課程身份與通訊埠！";
+
+    if (!isChromeActive || !status.extensionConnected) {
       await extensionBridge.launchSetupGuideInChrome();
       actionTaken = "LAUNCHED_SETUP_GUIDE_IN_CHROME";
+      statusText = "SETUP_REQUIRED";
+      advice = "尚未偵測到擴充功能連線。已自動為您開啟安裝引導頁面，請在 Chrome 中依照說明載入未打包擴充套件。";
+    } else if (!status.hasCredentials) {
+      await extensionBridge.openExtensionWizard("setup_" + Date.now(), "Claude Desktop MCP");
+      actionTaken = "LAUNCHED_EXTENSION_WIZARD";
+      statusText = "CREDENTIALS_REQUIRED";
+      advice = "擴充功能已載入但尚未設定校務系統帳號密碼。已為您在 Chrome 喚醒擴充功能全螢幕設定精靈。";
     }
 
     return {
@@ -256,14 +265,14 @@ server.tool(
         {
           type: "text",
           text: JSON.stringify({
-            status: isChromeActive && isExtReady ? "READY" : "SETUP_REQUIRED",
+            status: statusText,
             chromeRunning: isChromeActive,
-            extensionConnected: isExtReady,
+            extensionConnected: status.extensionConnected,
+            hasCredentials: status.hasCredentials,
             actionTaken,
             setupGuideUrl: guideUrl,
-            advice: isExtReady 
-              ? "Chrome 擴充功能處於就緒狀態，已具備課程身份與通訊埠！" 
-              : "已自動為您開啟設定精靈頁面，請在 Chrome 中依照 3 個步驟載入擴充套件並設定密碼。"
+            wizardUrl: status.wizardUrl,
+            advice
           }, null, 2)
         }
       ]
@@ -278,8 +287,27 @@ server.tool(
   async () => {
     // 1. 確保 Chrome 啟動並進入 eeclass
     const sessionRes = await extensionBridge.ensureChromeAndEeclassSession();
-    
-    // 2. 取得並劃分課程身分
+    const status = await extensionBridge.getExtensionStatus();
+
+    // 2. 若擴充套件未載入，開啟安裝指引
+    if (!status.extensionConnected) {
+      await extensionBridge.launchSetupGuideInChrome();
+    }
+
+    // 3. 嘗試直接向真實外掛抓取活體課程
+    try {
+      const liveCourses = await extensionBridge.queryRealExtension("get_live_courses", {}, 6000);
+      if (liveCourses && (liveCourses.teachingCourses || liveCourses.studentCourses)) {
+        if (Array.isArray(liveCourses.teachingCourses) && liveCourses.teachingCourses.length > 0) {
+          extensionBridge.cachedCourseRoles.teachingCourses = liveCourses.teachingCourses;
+        }
+        if (Array.isArray(liveCourses.studentCourses) && liveCourses.studentCourses.length > 0) {
+          extensionBridge.cachedCourseRoles.studentCourses = liveCourses.studentCourses;
+        }
+      }
+    } catch (e) {}
+
+    // 4. 取得並劃分課程身分
     const roles = extensionBridge.cachedCourseRoles;
     extensionBridge.syncCourseRolesToConsentManager();
 
