@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>eeclass 全能助手 - 擴充功能安裝引導</title>
+    <title>eeclass 全能助手 - 擴充功能安裝與識別引導</title>
     <link rel="stylesheet" href="consent.css">
     <style>
         .step-card {
@@ -128,10 +128,69 @@
             color: var(--text-secondary);
             margin-top: 2px;
         }
+        .detected-ext-card {
+            border: 1px solid #bbf7d0;
+            background: #f0fdf4;
+            border-radius: 6px;
+            padding: 12px 14px;
+            margin-top: 12px;
+        }
+        .detected-grid {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 12px;
+            font-size: 12.5px;
+            margin-top: 6px;
+        }
+        .detected-label {
+            color: #6b7280;
+            font-weight: 500;
+        }
+        .detected-val {
+            color: #1f2937;
+            font-weight: 600;
+            word-break: break-all;
+        }
+        .ext-list-drawer {
+            margin-top: 14px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            overflow: hidden;
+            background: #ffffff;
+        }
+        .ext-list-header {
+            padding: 10px 14px;
+            background: #f9fafb;
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .ext-list-content {
+            max-height: 220px;
+            overflow-y: auto;
+            border-top: 1px solid #e5e7eb;
+            font-size: 12px;
+        }
+        .ext-list-item {
+            padding: 8px 14px;
+            border-bottom: 1px solid #f3f4f6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .ext-list-item.is-eeclass {
+            background: rgba(159, 95, 165, 0.08);
+            border-left: 3px solid var(--primary-purple);
+        }
     </style>
 </head>
 <body>
-    <div class="consent-container" style="max-width: 720px;">
+    <div class="consent-container" style="max-width: 740px;">
         <header class="consent-header">
             <div class="header-logo-area">
                 <svg class="header-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
@@ -141,12 +200,12 @@
                 </svg>
                 <div class="header-titles">
                     <h1 class="header-title">eeclass 全能助手</h1>
-                    <span class="header-subtitle">擴充功能安裝與連線引導</span>
+                    <span class="header-subtitle">擴充功能安裝與識別引導</span>
                 </div>
             </div>
             <div class="header-security-badge" id="setup-status-badge">
                 <span class="status-dot"></span>
-                <span id="setup-status-text">探測擴充功能狀態中...</span>
+                <span id="setup-status-text">正在探測本機 Chrome 擴充功能...</span>
             </div>
         </header>
 
@@ -156,7 +215,7 @@
 
         <main class="consent-body">
             <!-- 步驟 1：取得擴充功能原始碼 -->
-            <div class="step-card active" id="step-1-card">
+            <div class="step-card" id="step-1-card">
                 <div class="step-badge" id="step-1-badge">1</div>
                 <div class="step-content">
                     <h2 class="step-title">步驟一：取得擴充功能目錄</h2>
@@ -188,37 +247,67 @@
                     <ol class="guide-steps-list">
                         <li>開啟 Google Chrome，於網址列輸入 <span class="code-badge">chrome://extensions/</span> 並按下 Enter</li>
                         <li>開啟右上角「<strong>開發人員模式</strong>」開關</li>
-                        <li>點擊左上角「<strong>載入未打包項目</strong>」，選擇上述專案目錄完成載入</li>
+                        <li>點擊左上角「<strong>載入未打包項目</strong>」，選擇上方專案目錄完成載入</li>
                     </ol>
                 </div>
             </div>
 
-            <!-- 步驟 3：連線檢測與啟動設定精靈 -->
-            <div class="step-card" id="step-3-card">
+            <!-- 步驟 3：本機 Chrome 擴充功能識別與設定精靈啟動 -->
+            <div class="step-card active" id="step-3-card">
                 <div class="step-badge" id="step-3-badge">3</div>
                 <div class="step-content">
-                    <h2 class="step-title">步驟三：外掛連線檢測與啟動全螢幕設定精靈</h2>
-                    <p class="step-desc">載入完成後，外掛背景服務將自動與本機 MCP 橋接器建立即時連線。系統將自動啟動擴充功能內建的全螢幕設定精靈。</p>
+                    <h2 class="step-title">步驟三：擴充功能識別與啟動全螢幕設定精靈</h2>
+                    <p class="step-desc">系統已主動探測本機 Chrome 使用者設定檔，並即時識別 eeclass 全能助手擴充功能：</p>
                     
+                    <!-- 偵測成功卡片 -->
+                    <div id="detected-ext-box" class="detected-ext-card" style="display: none;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <strong style="color: #15803d; font-size: 13.5px;">✓ 已成功於本機 Chrome 識別到 eeclass 擴充套件！</strong>
+                            <span class="badge-pill" style="background: rgba(22, 163, 74, 0.15); color: #15803d;">就緒可啟動</span>
+                        </div>
+                        <div class="detected-grid">
+                            <span class="detected-label">套件名稱：</span>
+                            <span class="detected-val" id="det-name">NTHU eeclass Copilot｜清大數位學習全能助手</span>
+                            <span class="detected-label">套件 ID：</span>
+                            <span class="detected-val"><code id="det-id">jalhfbhaelibpeomfloddhmhieckehfj</code></span>
+                            <span class="detected-label">所在設定檔：</span>
+                            <span class="detected-val" id="det-profile">Profile 8 (人員 1 - wasonisgood@gmail.com)</span>
+                            <span class="detected-label">載入目錄：</span>
+                            <span class="detected-val" id="det-path">C:\Users\user\Downloads\式\nthu-eeclass-copilot</span>
+                        </div>
+                    </div>
+
+                    <!-- 即時連線狀態條 -->
                     <div class="status-box" id="ext-status-box">
                         <span class="status-dot-pulse active" id="ext-status-dot"></span>
                         <div style="flex: 1;">
-                            <div class="status-content-title" id="ext-status-title">正在探測擴充套件連線狀態...</div>
-                            <div class="status-content-desc" id="ext-status-desc">請完成上方載入未打包項目步驟。載入後此處將自動更新。</div>
+                            <div class="status-content-title" id="ext-status-title">正在探測本機 Chrome 擴充功能...</div>
+                            <div class="status-content-desc" id="ext-status-desc">系統正在深度掃描 Chrome 使用者設定檔清單...</div>
                         </div>
                     </div>
 
                     <div class="step-action-row" style="margin-top: 14px;">
-                        <button type="button" class="btn btn-primary" id="btn-verify-and-launch">
+                        <button type="button" class="btn btn-accent" id="btn-launch-wizard" style="display: none;">
                             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                                 <circle cx="8" cy="8" r="7"></circle>
                                 <polyline points="6 8 8 10 11 6"></polyline>
                             </svg>
-                            我已載入完成，檢測連線並啟動設定精靈
+                            立即啟動全螢幕設定精靈 &rarr;
                         </button>
-                        <a id="btn-direct-wizard" class="btn btn-accent" target="_blank" style="display: none; text-decoration: none;">
-                            開啟全螢幕設定精靈 &rarr;
-                        </a>
+                        <button type="button" class="btn btn-primary" id="btn-verify-and-launch">
+                            重新檢測本機外掛狀態
+                        </button>
+                    </div>
+
+                    <!-- Chrome 全部已安裝擴充功能折疊清冊 -->
+                    <div class="ext-list-drawer" id="ext-list-drawer">
+                        <div class="ext-list-header" id="ext-list-toggle">
+                            <span id="ext-list-summary">檢視本機 Chrome 已安裝的所有擴充功能清單 (載入中...)</span>
+                            <span id="ext-list-arrow">&darr;</span>
+                        </div>
+                        <div class="ext-list-content" id="ext-list-body" style="display: none;">
+                            <!-- 動態填入 -->
+                        </div>
                     </div>
                 </div>
             </div>

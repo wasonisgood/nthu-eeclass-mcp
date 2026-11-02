@@ -222,17 +222,37 @@ export class ExtensionBridge {
         if (url.pathname === '/extension/status' && req.method === 'GET') {
           const isHeartbeatFresh = (Date.now() - this.lastHeartbeat) < 60000;
           const isConnected = this.extensionConnected && isHeartbeatFresh;
+          const diskScan = this.detectInstalledChromeExtensions();
+          const targetWizard = this.extensionInfo?.wizardUrl || diskScan.eeclassExtension?.wizardUrl || null;
+          const targetOptions = this.extensionInfo?.optionsUrl || diskScan.eeclassExtension?.optionsUrl || null;
+
           res.writeHead(200, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({
             bridgeActive: true,
             extensionConnected: isConnected,
+            installedOnDisk: Boolean(diskScan.eeclassExtension),
+            detectedExtension: diskScan.eeclassExtension,
             hasCredentials: Boolean(this.extensionInfo?.hasCredentials),
-            wizardUrl: this.extensionInfo?.wizardUrl || null,
-            optionsUrl: this.extensionInfo?.optionsUrl || null,
-            extensionInfo: this.extensionInfo,
+            wizardUrl: targetWizard,
+            optionsUrl: targetOptions,
+            extensionInfo: this.extensionInfo || (diskScan.eeclassExtension ? {
+              extensionId: diskScan.eeclassExtension.id,
+              version: diskScan.eeclassExtension.version,
+              wizardUrl: targetWizard,
+              optionsUrl: targetOptions,
+              hasCredentials: false
+            } : null),
+            totalChromeExtensionsInstalled: diskScan.totalFound,
             lastReceivedEvent: this.lastReceivedEvent,
             port: this.bridgePort
           }));
+        }
+
+        // 5.1 查詢 Chrome 所有已安裝擴充功能清冊 (GET /extension/installed-list)
+        if (url.pathname === '/extension/installed-list' && req.method === 'GET') {
+          const diskScan = this.detectInstalledChromeExtensions();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify(diskScan));
         }
 
         // 6. 觸發擴充功能全螢幕設定精靈 (POST /extension/open-wizard)
@@ -470,10 +490,108 @@ export class ExtensionBridge {
   }
 
   /**
+   * 深度掃描本機 Chrome 所有使用者設定檔 (Default, Profile 1..N)
+   * 取得所有已安裝擴充功能清單，並精準識別是否已安裝 eeclass 外掛
+   */
+  detectInstalledChromeExtensions() {
+    const userData = path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
+    if (!fs.existsSync(userData)) {
+      return { totalFound: 0, extensions: [], eeclassExtension: null };
+    }
+
+    let profiles = [];
+    try {
+      profiles = fs.readdirSync(userData).filter(d => {
+        try {
+          return fs.statSync(path.join(userData, d)).isDirectory() && 
+            (fs.existsSync(path.join(userData, d, 'Preferences')) || fs.existsSync(path.join(userData, d, 'Secure Preferences')));
+        } catch { return false; }
+      });
+    } catch {
+      return { totalFound: 0, extensions: [], eeclassExtension: null };
+    }
+
+    const allExts = [];
+    const seen = new Set();
+    let foundEeclass = null;
+
+    for (const prof of profiles) {
+      let profileName = prof;
+      let accountEmail = '';
+      const prefPath = path.join(userData, prof, 'Preferences');
+      if (fs.existsSync(prefPath)) {
+        try {
+          const prefData = JSON.parse(fs.readFileSync(prefPath, 'utf8'));
+          profileName = prefData?.profile?.name || prof;
+          accountEmail = prefData?.account_info?.[0]?.email || '';
+        } catch {}
+      }
+
+      for (const fn of ['Preferences', 'Secure Preferences']) {
+        const fPath = path.join(userData, prof, fn);
+        if (!fs.existsSync(fPath)) continue;
+        try {
+          const raw = fs.readFileSync(fPath, 'utf8');
+          const data = JSON.parse(raw);
+          const settings = data?.extensions?.settings || {};
+
+          for (const [id, ext] of Object.entries(settings)) {
+            const key = `${prof}:${id}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            let name = ext?.manifest?.name || '';
+            const extPath = ext?.path || '';
+            const version = ext?.manifest?.version || ext?.service_worker_registration_info?.version || '';
+            
+            if (!name && extPath && fs.existsSync(path.join(extPath, 'manifest.json'))) {
+              try {
+                const m = JSON.parse(fs.readFileSync(path.join(extPath, 'manifest.json'), 'utf8'));
+                name = m.name || '';
+              } catch {}
+            }
+
+            const isEeclass = /nthu-eeclass-copilot/i.test(extPath) || 
+                              /eeclass/i.test(name) || 
+                              id === 'jalhfbhaelibpeomfloddhmhieckehfj';
+
+            const item = {
+              id,
+              name: name || extPath || id,
+              version,
+              path: extPath,
+              profile: prof,
+              profileDisplayName: accountEmail ? `${profileName} (${accountEmail})` : profileName,
+              isEeclass: Boolean(isEeclass)
+            };
+
+            allExts.push(item);
+
+            if (isEeclass && !foundEeclass) {
+              foundEeclass = {
+                ...item,
+                wizardUrl: `chrome-extension://${id}/options.html?mode=full&wizard=1`,
+                optionsUrl: `chrome-extension://${id}/options.html?mode=full`
+              };
+            }
+          }
+        } catch {}
+      }
+    }
+
+    return {
+      totalFound: allExts.length,
+      extensions: allExts,
+      eeclassExtension: foundEeclass
+    };
+  }
+
+  /**
    * 喚醒 Chrome 擴充功能內建的全螢幕設定精靈 (options.html?mode=full&wizard=1)
    */
   async openExtensionWizard(sessionId = 'mcp_' + Date.now(), caller = 'Claude Desktop MCP') {
     await this.startBridgeServer();
+    const diskScan = this.detectInstalledChromeExtensions();
 
     const cmd = {
       callId: 'wiz_' + Date.now(),
@@ -494,17 +612,25 @@ export class ExtensionBridge {
       this.pendingCommands.push(cmd);
     }
 
-    let targetUrl = this.extensionInfo?.wizardUrl;
+    let targetUrl = this.extensionInfo?.wizardUrl || diskScan.eeclassExtension?.wizardUrl;
     if (targetUrl) {
       const glue = targetUrl.includes('?') ? '&' : '?';
       targetUrl += `${glue}session=${encodeURIComponent(sessionId)}&caller=${encodeURIComponent(caller)}`;
-      spawn('cmd.exe', ['/c', 'start', 'chrome', targetUrl], { detached: true, stdio: 'ignore' });
+      
+      const chromeArgs = [];
+      if (diskScan.eeclassExtension?.profile) {
+        chromeArgs.push(`--profile-directory=${diskScan.eeclassExtension.profile}`);
+      }
+      chromeArgs.push(targetUrl);
+
+      spawn('cmd.exe', ['/c', 'start', 'chrome', ...chromeArgs], { detached: true, stdio: 'ignore' });
     }
 
     return {
       success: true,
       sessionId,
       wizardUrl: targetUrl,
+      detectedProfile: diskScan.eeclassExtension?.profile || null,
       message: '已向 Chrome 擴充套件發送全螢幕設定精靈啟動指令'
     };
   }
@@ -516,13 +642,17 @@ export class ExtensionBridge {
     const chromeRunning = await this.isChromeRunning();
     const isHeartbeatFresh = (Date.now() - this.lastHeartbeat) < 60000;
     const isConnected = this.extensionConnected && isHeartbeatFresh;
+    const diskScan = this.detectInstalledChromeExtensions();
     return {
       chromeRunning,
       extensionConnected: isConnected,
+      installedOnDisk: Boolean(diskScan.eeclassExtension),
+      detectedExtension: diskScan.eeclassExtension,
       hasCredentials: Boolean(this.extensionInfo?.hasCredentials),
-      wizardUrl: this.extensionInfo?.wizardUrl || null,
-      optionsUrl: this.extensionInfo?.optionsUrl || null,
-      extensionInfo: this.extensionInfo
+      wizardUrl: this.extensionInfo?.wizardUrl || diskScan.eeclassExtension?.wizardUrl || null,
+      optionsUrl: this.extensionInfo?.optionsUrl || diskScan.eeclassExtension?.optionsUrl || null,
+      extensionInfo: this.extensionInfo,
+      totalExtensionsInstalled: diskScan.totalFound
     };
   }
 

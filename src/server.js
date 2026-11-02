@@ -236,6 +236,41 @@ const store = {
 // ==================== 1. 權限與 UI 許可工具 ====================
 
 server.tool(
+  "list_installed_chrome_extensions",
+  "【Chrome 擴充功能清查與識別】深度掃描本機 Google Chrome 所有使用者設定檔 (Default, Profile 1..N)，列出目前所有已安裝的擴充功能，並自動精確比對標記哪一個是清大 eeclass 全能助手擴充套件（包含 Extension ID、安裝目錄、所在 Profile 與啟用狀態）。",
+  {},
+  async () => {
+    const scan = extensionBridge.detectInstalledChromeExtensions();
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            totalFound: scan.totalFound,
+            eeclassIdentified: Boolean(scan.eeclassExtension),
+            eeclassExtension: scan.eeclassExtension ? {
+              name: scan.eeclassExtension.name,
+              id: scan.eeclassExtension.id,
+              version: scan.eeclassExtension.version,
+              profile: scan.eeclassExtension.profileDisplayName,
+              path: scan.eeclassExtension.path,
+              wizardUrl: scan.eeclassExtension.wizardUrl,
+              optionsUrl: scan.eeclassExtension.optionsUrl
+            } : null,
+            allExtensionsSummary: scan.extensions.map(e => ({
+              name: e.name,
+              id: e.id,
+              profile: e.profileDisplayName,
+              isEeclass: e.isEeclass
+            }))
+          }, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+server.tool(
   "check_extension_and_setup_status",
   "【環境與設定檢測】檢查 Google Chrome 瀏覽器是否開啟、擴充功能是否安裝並就緒、校務資訊系統密碼是否已完成加密設定，以及目前課程身份辨識狀態。若尚未載入擴充套件將引導安裝；若已安裝但未設定將自動喚醒擴充功能內建全螢幕設定精靈。",
   {},
@@ -248,11 +283,17 @@ server.tool(
     let statusText = "READY";
     let advice = "Chrome 擴充功能處於就緒狀態，已具備課程身份與通訊埠！";
 
-    if (!isChromeActive || !status.extensionConnected) {
+    if (!isChromeActive || (!status.extensionConnected && !status.installedOnDisk)) {
       await extensionBridge.launchSetupGuideInChrome();
       actionTaken = "LAUNCHED_SETUP_GUIDE_IN_CHROME";
       statusText = "SETUP_REQUIRED";
       advice = "尚未偵測到擴充功能連線。已自動為您開啟安裝引導頁面，請在 Chrome 中依照說明載入未打包擴充套件。";
+    } else if (status.installedOnDisk && !status.extensionConnected) {
+      // 磁碟已識別外掛，自動喚醒其所在之 Profile
+      await extensionBridge.openExtensionWizard("setup_" + Date.now(), "Claude Desktop MCP");
+      actionTaken = "LAUNCHED_EXTENSION_WIZARD_DIRECT";
+      statusText = "EXTENSION_IDENTIFIED_LAUNCHING_WIZARD";
+      advice = `已在 Chrome ${status.detectedExtension?.profileDisplayName || "設定檔"} 識別到 eeclass 擴充套件，已為您自動開啟全螢幕設定精靈！`;
     } else if (!status.hasCredentials) {
       await extensionBridge.openExtensionWizard("setup_" + Date.now(), "Claude Desktop MCP");
       actionTaken = "LAUNCHED_EXTENSION_WIZARD";
@@ -268,6 +309,8 @@ server.tool(
             status: statusText,
             chromeRunning: isChromeActive,
             extensionConnected: status.extensionConnected,
+            installedOnDisk: status.installedOnDisk,
+            detectedExtension: status.detectedExtension,
             hasCredentials: status.hasCredentials,
             actionTaken,
             setupGuideUrl: guideUrl,
