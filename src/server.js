@@ -528,11 +528,48 @@ server.tool(
   "取得所有所屬身份為助教或老師的課程清單（包含課程代碼、數字 ID、授課教師名單與身份）。這是所有作業、測驗與公告功能的基礎。",
   {},
   async () => {
+    try {
+      const live = await extensionBridge.queryRealExtension("list_teaching_courses", {});
+      if (live && live.loggedIn && live.teachingCourses) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "LIVE_CONNECTED",
+                source: "國立清華大學 eeclass 平台 (Chrome 外掛活體連線)",
+                teachingCoursesCount: live.teachingCourses.length,
+                totalCourses: live.totalCourses,
+                teachingCourses: live.teachingCourses,
+                studentCourses: live.studentCourses || []
+              }, null, 2)
+            }
+          ]
+        };
+      }
+      if (live && live.loggedIn === false) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "NOT_LOGGED_IN",
+                message: live.message || "您尚未在 Chrome 瀏覽器中登入 eeclass。請先開啟 Chrome 並完成登入，系統即可自動為您帶入個人的真實課程清單。",
+                offlineFallback: store.courses
+              }, null, 2)
+            }
+          ]
+        };
+      }
+    } catch (e) {}
+
     return {
       content: [
         {
           type: "text",
           text: JSON.stringify({
+            status: "OFFLINE_REFERENCE",
+            notice: "提示：尚未偵測到活動中的 Chrome 外掛連線。請確保已安裝並開啟 Chrome 擴充功能，以自動同步您的真實課程。",
             count: store.courses.length,
             courses: store.courses
           }, null, 2)
@@ -549,12 +586,31 @@ server.tool(
     courseId: z.number().describe("課程數字 ID（例如行政法一為 35657）")
   },
   async ({ courseId }) => {
+    try {
+      const live = await extensionBridge.queryRealExtension("get_course_sidebar_info", { courseId });
+      if (live && !live.error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "LIVE_CONNECTED",
+                source: "國立清華大學 eeclass 課程側欄 (真實活體資料)",
+                ...live
+              }, null, 2)
+            }
+          ]
+        };
+      }
+    } catch (e) {}
+
     const course = store.courses.find(c => c.courseId === courseId) || store.courses[0];
     return {
       content: [
         {
           type: "text",
           text: JSON.stringify({
+            status: "OFFLINE_REFERENCE",
             courseId: course.courseId,
             courseCode: course.courseCode,
             courseName: course.courseName,
@@ -577,6 +633,26 @@ server.tool(
     courseId: z.number().describe("課程數字 ID（如 35657）")
   },
   async ({ courseId }) => {
+    try {
+      const live = await extensionBridge.queryRealExtension("list_homeworks", { courseId });
+      if (live && live.homeworks) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "LIVE_CONNECTED",
+                source: "國立清華大學 eeclass 課程作業清單 (真實活體資料)",
+                courseId,
+                count: live.count,
+                homeworks: live.homeworks
+              }, null, 2)
+            }
+          ]
+        };
+      }
+    } catch (e) {}
+
     const hws = store.homeworks.filter(h => h.courseId === courseId);
     return {
       content: [
@@ -827,6 +903,26 @@ server.tool(
     courseId: z.number().describe("課程 ID")
   },
   async ({ courseId }) => {
+    try {
+      const live = await extensionBridge.queryRealExtension("list_exams", { courseId });
+      if (live && live.exams) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "LIVE_CONNECTED",
+                source: "國立清華大學 eeclass 測驗清單 (真實活體資料)",
+                courseId,
+                count: live.count,
+                exams: live.exams
+              }, null, 2)
+            }
+          ]
+        };
+      }
+    } catch (e) {}
+
     const exams = store.exams.filter(e => e.courseId === courseId);
     return {
       content: [
@@ -943,6 +1039,26 @@ server.tool(
     courseId: z.number().describe("課程 ID")
   },
   async ({ courseId }) => {
+    try {
+      const live = await extensionBridge.queryRealExtension("list_bulletins", { courseId });
+      if (live && live.bulletins) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                status: "LIVE_CONNECTED",
+                source: "國立清華大學 eeclass 課程公告清單 (真實活體資料)",
+                courseId,
+                count: live.count,
+                bulletins: live.bulletins
+              }, null, 2)
+            }
+          ]
+        };
+      }
+    } catch (e) {}
+
     const list = store.bulletins.filter(b => b.courseId === courseId);
     return {
       content: [

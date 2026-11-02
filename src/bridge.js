@@ -35,6 +35,9 @@ export class ExtensionBridge {
     this.decisionCallbacks = new Map(); // requestId -> { resolve, reject }
     this.extensionConnected = false;
     this.lastHeartbeat = 0;
+    this.pendingCommands = [];
+    this.waitingPollResponse = null;
+    this.commandCallbacks = new Map(); // callId -> { resolve, timer }
 
     // 預設已辨識之課程清單（包含行政法一 TA、演算法與通識修課學生）
     this.cachedCourseRoles = {
@@ -120,7 +123,66 @@ export class ExtensionBridge {
           }
         }
 
-        // 2. 外掛 ACK 與心跳接收
+        // 2. 外掛長輪詢指令端點 (GET /extension/poll)
+        if (url.pathname === '/extension/poll' && req.method === 'GET') {
+          this.extensionConnected = true;
+          this.lastHeartbeat = Date.now();
+
+          if (this.pendingCommands.length > 0) {
+            const cmd = this.pendingCommands.shift();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ hasCommand: true, command: cmd }));
+          }
+
+          this.waitingPollResponse = res;
+          req.on('close', () => {
+            if (this.waitingPollResponse === res) {
+              this.waitingPollResponse = null;
+            }
+          });
+
+          // 20 秒長輪詢超時，維持連線並釋放
+          const timer = setTimeout(() => {
+            if (this.waitingPollResponse === res) {
+              this.waitingPollResponse = null;
+              try {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ hasCommand: false }));
+              } catch (e) {}
+            }
+          }, 20000);
+          return;
+        }
+
+        // 3. 外掛真實資料執行結果回報 (POST /extension/reply)
+        if (url.pathname === '/extension/reply' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => body += chunk);
+          req.on('end', () => {
+            try {
+              const data = JSON.parse(body);
+              const { callId, result, error } = data;
+              this.extensionConnected = true;
+              this.lastHeartbeat = Date.now();
+
+              if (this.commandCallbacks.has(callId)) {
+                const { resolve, timer } = this.commandCallbacks.get(callId);
+                clearTimeout(timer);
+                this.commandCallbacks.delete(callId);
+                resolve(result !== undefined ? result : { error });
+              }
+
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+            } catch (e) {
+              res.writeHead(400);
+              res.end(JSON.stringify({ error: e.message }));
+            }
+          });
+          return;
+        }
+
+        // 4. 外掛 ACK 與心跳接收
         if (url.pathname === '/extension/ack' && req.method === 'POST') {
           let body = '';
           req.on('data', chunk => body += chunk);
@@ -341,6 +403,40 @@ export class ExtensionBridge {
           resolve(result);
         }
       });
+    });
+  }
+
+  /**
+   * 向 Chrome 擴充套件發送指令，即時擷取使用者在真實 eeclass 平台的個人活體資料
+   */
+  async queryRealExtension(action, params = {}, timeoutMs = 6000) {
+    if (!this.extensionConnected && !this.waitingPollResponse && this.pendingCommands.length > 5) {
+      return null;
+    }
+
+    const callId = 'call_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const command = { callId, action, params };
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.commandCallbacks.delete(callId);
+        resolve(null);
+      }, timeoutMs);
+
+      this.commandCallbacks.set(callId, { resolve, timer });
+
+      if (this.waitingPollResponse) {
+        const res = this.waitingPollResponse;
+        this.waitingPollResponse = null;
+        try {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ hasCommand: true, command }));
+        } catch (e) {
+          this.pendingCommands.push(command);
+        }
+      } else {
+        this.pendingCommands.push(command);
+      }
     });
   }
 
